@@ -1,0 +1,848 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+-- API de Delta
+local virtualInput = UserInputService:CreateVirtualInput()
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+local character, humanoid, hrp
+
+local function setupCharacter(char)
+	character = char
+	humanoid = char:WaitForChild("Humanoid")
+	hrp = char:WaitForChild("HumanoidRootPart")
+end
+
+setupCharacter(player.Character or player.CharacterAdded:Wait())
+player.CharacterAdded:Connect(setupCharacter)
+
+-- =====================================
+-- CONFIGURACIÓN DEL AUTOCLICKER
+-- =====================================
+
+local intervalos = {50, 100, 200, 300, 500, 1000}
+local intervaloIndex = 4
+local intervaloClick = intervalos[intervaloIndex]
+
+local tiposClick = {"Simple", "Doble", "Triple", "Cuádruple"}
+local tipoIndex = 1
+
+local botonesClick = {
+	{name = "Izquierdo", value = Enum.UserInputType.MouseButton1},
+	{name = "Derecho", value = Enum.UserInputType.MouseButton2},
+	{name = "Central", value = Enum.UserInputType.MouseButton3}
+}
+local botonIndex = 1
+
+local repetirContinuamente = true
+local cantidadRepeticiones = 10
+local cantidadRealizada = 0
+
+local posicionModo = "Centro"
+local posicionElegida = nil
+local esperandoPosicion = false
+
+local autoEnabled = false
+local systemActive = true
+local hudVisible = true
+
+local tiempoAcumulado = 0
+
+-- =====================================
+-- INTERFAZ
+-- =====================================
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CustomMobileControls"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local function crearBoton(nombre, texto, tamano, posicion, padre)
+	local boton = Instance.new("TextButton")
+	boton.Name = nombre
+	boton.Size = tamano
+	boton.Position = posicion
+	boton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	boton.BackgroundTransparency = 0.15
+	boton.Text = texto
+	boton.TextSize = 14
+	boton.Font = Enum.Font.GothamBold
+	boton.TextColor3 = Color3.new(1, 1, 1)
+	boton.AutoButtonColor = false
+	boton.Parent = padre or screenGui
+
+	Instance.new("UICorner", boton).CornerRadius = UDim.new(0, 8)
+
+	return boton
+end
+
+local function crearTexto(nombre, texto, posicion, tamano, padre)
+	local label = Instance.new("TextLabel")
+	label.Name = nombre
+	label.Size = tamano
+	label.Position = posicion
+	label.BackgroundTransparency = 1
+	label.Text = texto
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.TextSize = 13
+	label.Font = Enum.Font.Gotham
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = padre
+	return label
+end
+
+-- =====================================
+-- BOTONES FLOTANTES
+-- =====================================
+
+local autoBtn = crearBoton(
+	"AutoClicker",
+	"🖱️",
+	UDim2.new(0, 70, 0, 70),
+	UDim2.new(0.80, 0, 0.48, 0)
+)
+autoBtn.TextSize = 34
+autoBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+autoBtn.ClipsDescendants = true
+Instance.new("UICorner", autoBtn).CornerRadius = UDim.new(1, 0)
+
+local speedBtn = crearBoton(
+	"ClickSpeed",
+	"⚡ 300",
+	UDim2.new(0, 70, 0, 40),
+	UDim2.new(0.80, 0, 0.57, 0)
+)
+
+local jumpBtn = crearBoton(
+	"JumpButton",
+	"⬆️",
+	UDim2.new(0, 75, 0, 75),
+	UDim2.new(0.80, 0, 0.68, 0)
+)
+jumpBtn.TextSize = 34
+jumpBtn.ClipsDescendants = true
+Instance.new("UICorner", jumpBtn).CornerRadius = UDim.new(1, 0)
+
+-- =====================================
+-- JOYSTICK
+-- =====================================
+
+local joyBase = Instance.new("Frame")
+joyBase.Name = "JoystickBase"
+joyBase.Size = UDim2.new(0, 140, 0, 140)
+joyBase.Position = UDim2.new(0.06, 0, 0.52, 0)
+joyBase.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+joyBase.BackgroundTransparency = 0.45
+joyBase.Active = true
+joyBase.Parent = screenGui
+
+Instance.new("UICorner", joyBase).CornerRadius = UDim.new(1, 0)
+
+local joyKnob = Instance.new("Frame")
+joyKnob.Name = "JoystickKnob"
+joyKnob.Size = UDim2.new(0, 58, 0, 58)
+joyKnob.Position = UDim2.new(0.5, -29, 0.5, -29)
+joyKnob.BackgroundColor3 = Color3.new(1, 1, 1)
+joyKnob.BackgroundTransparency = 0.05
+joyKnob.Active = false
+joyKnob.Parent = joyBase
+
+Instance.new("UICorner", joyKnob).CornerRadius = UDim.new(1, 0)
+
+-- =====================================
+-- PANEL
+-- =====================================
+
+local panel = Instance.new("Frame")
+panel.Name = "ClickerPanel"
+panel.Size = UDim2.new(0, 235, 0, 300)
+panel.Position = UDim2.new(0.04, 0, 0.10, 0)
+panel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+panel.BackgroundTransparency = 0.05
+panel.Parent = screenGui
+
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 10)
+
+local header = crearTexto(
+	"Header",
+	"⚙️ Panel Clicker",
+	UDim2.new(0, 10, 0, 5),
+	UDim2.new(0, 175, 0, 30),
+	panel
+)
+header.Font = Enum.Font.GothamBold
+header.TextSize = 15
+
+local minimizeBtn = crearBoton(
+	"Minimize",
+	"−",
+	UDim2.new(0, 30, 0, 27),
+	UDim2.new(1, -35, 0, 5),
+	panel
+)
+
+local restoreBtn = crearBoton(
+	"Restore",
+	"⚙",
+	UDim2.new(0, 42, 0, 42),
+	UDim2.new(0.04, 0, 0.10, 0)
+)
+restoreBtn.TextSize = 22
+restoreBtn.Visible = false
+
+-- Intervalo
+crearTexto(
+	"IntervalTitle",
+	"Intervalo (ms)",
+	UDim2.new(0, 12, 0, 42),
+	UDim2.new(0, 110, 0, 22),
+	panel
+)
+
+local intervalMinus = crearBoton(
+	"IntervalMinus",
+	"−",
+	UDim2.new(0, 40, 0, 30),
+	UDim2.new(0, 12, 0, 66),
+	panel
+)
+
+local intervalLabel = crearTexto(
+	"IntervalLabel",
+	"300 ms",
+	UDim2.new(0, 65, 0, 66),
+	UDim2.new(0, 100, 0, 30),
+	panel
+)
+intervalLabel.TextXAlignment = Enum.TextXAlignment.Center
+intervalLabel.Font = Enum.Font.GothamBold
+
+local intervalPlus = crearBoton(
+	"IntervalPlus",
+	"+",
+	UDim2.new(0, 40, 0, 30),
+	UDim2.new(1, -52, 0, 66),
+	panel
+)
+
+-- Tipo de clic
+crearTexto(
+	"ClickTypeTitle",
+	"Tipo de clic",
+	UDim2.new(0, 12, 0, 103),
+	UDim2.new(0, 100, 0, 20),
+	panel
+)
+
+local typeBtn = crearBoton(
+	"ClickType",
+	"Simple",
+	UDim2.new(0, 105, 0, 28),
+	UDim2.new(0, 118, 0, 100),
+	panel
+)
+
+-- Botón del mouse
+crearTexto(
+	"MouseButtonTitle",
+	"Botón",
+	UDim2.new(0, 12, 0, 137),
+	UDim2.new(0, 100, 0, 20),
+	panel
+)
+
+local mouseBtn = crearBoton(
+	"MouseButton",
+	"Izquierdo",
+	UDim2.new(0, 105, 0, 28),
+	UDim2.new(0, 118, 0, 134),
+	panel
+)
+
+-- Repetición
+crearTexto(
+	"RepeatTitle",
+	"Repetición",
+	UDim2.new(0, 12, 0, 171),
+	UDim2.new(0, 100, 0, 20),
+	panel
+)
+
+local repeatBtn = crearBoton(
+	"RepeatMode",
+	"Continua",
+	UDim2.new(0, 105, 0, 28),
+	UDim2.new(0, 118, 0, 168),
+	panel
+)
+
+local countMinus = crearBoton(
+	"CountMinus",
+	"−",
+	UDim2.new(0, 32, 0, 27),
+	UDim2.new(0, 12, 0, 202),
+	panel
+)
+
+local countLabel = crearTexto(
+	"CountLabel",
+	"10 veces",
+	UDim2.new(0, 48, 0, 202),
+	UDim2.new(0, 130, 0, 27),
+	panel
+)
+countLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+local countPlus = crearBoton(
+	"CountPlus",
+	"+",
+	UDim2.new(0, 32, 0, 27),
+	UDim2.new(1, -44, 0, 202),
+	panel
+)
+
+-- Posición
+crearTexto(
+	"PositionTitle",
+	"Posición",
+	UDim2.new(0, 12, 0, 235),
+	UDim2.new(0, 75, 0, 25),
+	panel
+)
+
+local positionBtn = crearBoton(
+	"PositionMode",
+	"Centro",
+	UDim2.new(0, 85, 0, 27),
+	UDim2.new(0, 75, 0, 234),
+	panel
+)
+
+local pickBtn = crearBoton(
+	"PickPosition",
+	"Elegir",
+	UDim2.new(0, 60, 0, 27),
+	UDim2.new(1, -70, 0, 234),
+	panel
+)
+
+local hudBtn = crearBoton(
+	"HUDToggle",
+	"Ocultar controles",
+	UDim2.new(0, 210, 0, 25),
+	UDim2.new(0, 12, 0, 268),
+	panel
+)
+hudBtn.TextSize = 12
+
+local statusLabel = crearTexto(
+	"Status",
+	"Autoclicker: apagado",
+	UDim2.new(0, 12, 0, 0),
+	UDim2.new(0, 210, 0, 20),
+	panel
+)
+statusLabel.Visible = false
+
+-- =====================================
+-- ACTUALIZAR PANEL
+-- =====================================
+
+local function actualizarPanel()
+	intervalLabel.Text = tostring(intervaloClick) .. " ms"
+	speedBtn.Text = "⚡ " .. tostring(intervaloClick)
+
+	typeBtn.Text = tiposClick[tipoIndex]
+	mouseBtn.Text = botonesClick[botonIndex].name
+
+	if repetirContinuamente then
+		repeatBtn.Text = "Continua"
+	else
+		repeatBtn.Text = "Limitada"
+	end
+
+	countLabel.Text = tostring(cantidadRepeticiones) .. " veces"
+
+	if posicionModo == "Centro" then
+		positionBtn.Text = "Centro"
+	else
+		positionBtn.Text = "Elegida"
+	end
+end
+
+local function cambiarIntervalo(delta)
+	intervaloClick = math.clamp(intervaloClick + delta, 1, 60000)
+	actualizarPanel()
+end
+
+intervalMinus.Activated:Connect(function()
+	cambiarIntervalo(50)
+end)
+
+intervalPlus.Activated:Connect(function()
+	cambiarIntervalo(-50)
+end)
+
+-- El botón ⚡ cambia entre intervalos preestablecidos
+speedBtn.Activated:Connect(function()
+	intervaloIndex += 1
+	if intervaloIndex > #intervalos then
+		intervaloIndex = 1
+	end
+	intervaloClick = intervalos[intervaloIndex]
+	actualizarPanel()
+end)
+
+typeBtn.Activated:Connect(function()
+	tipoIndex += 1
+	if tipoIndex > #tiposClick then
+		tipoIndex = 1
+	end
+	actualizarPanel()
+end)
+
+mouseBtn.Activated:Connect(function()
+	botonIndex += 1
+	if botonIndex > #botonesClick then
+		botonIndex = 1
+	end
+	actualizarPanel()
+end)
+
+repeatBtn.Activated:Connect(function()
+	repetirContinuamente = not repetirContinuamente
+	cantidadRealizada = 0
+	actualizarPanel()
+end)
+
+countMinus.Activated:Connect(function()
+	cantidadRepeticiones = math.max(1, cantidadRepeticiones - 1)
+	actualizarPanel()
+end)
+
+countPlus.Activated:Connect(function()
+	cantidadRepeticiones = math.min(50000, cantidadRepeticiones + 1)
+	actualizarPanel()
+end)
+
+positionBtn.Activated:Connect(function()
+	if posicionModo == "Centro" then
+		if posicionElegida then
+			posicionModo = "Elegida"
+		else
+			posicionModo = "Centro"
+		end
+	else
+		posicionModo = "Centro"
+	end
+	actualizarPanel()
+end)
+
+-- =====================================
+-- ELEGIR POSICIÓN TOCANDO LA PANTALLA
+-- =====================================
+
+pickBtn.Activated:Connect(function()
+	esperandoPosicion = true
+	pickBtn.Text = "Tocá..."
+	statusLabel.Text = "Tocá un lugar del juego"
+	statusLabel.Visible = true
+end)
+
+UserInputService.InputBegan:Connect(function(input, procesado)
+	if not esperandoPosicion then
+		return
+	end
+
+	if input.UserInputType ~= Enum.UserInputType.Touch
+	and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+		return
+	end
+
+	local objetos = player.PlayerGui:GetGuiObjectsAtPosition(
+		input.Position.X,
+		input.Position.Y
+	)
+
+	for _, objeto in ipairs(objetos) do
+		if objeto:IsDescendantOf(screenGui) then
+			return
+		end
+	end
+
+	posicionElegida = Vector2.new(
+		input.Position.X,
+		input.Position.Y
+	)
+
+	posicionModo = "Elegida"
+	esperandoPosicion = false
+	pickBtn.Text = "Elegir"
+	statusLabel.Visible = false
+	actualizarPanel()
+end)
+
+-- =====================================
+-- MINIMIZAR Y MOSTRAR PANEL
+-- =====================================
+
+minimizeBtn.Activated:Connect(function()
+	panel.Visible = false
+	restoreBtn.Visible = true
+end)
+
+restoreBtn.Activated:Connect(function()
+	panel.Visible = true
+	restoreBtn.Visible = false
+end)
+
+-- =====================================
+-- CONTROLES NATIVOS
+-- =====================================
+
+local function disableNativeControls()
+	pcall(function()
+		local playerModule = require(
+			player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule")
+		)
+		playerModule:GetControls():Disable()
+	end)
+end
+
+local function enableNativeControls()
+	pcall(function()
+		local playerModule = require(
+			player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule")
+		)
+		playerModule:GetControls():Enable()
+	end)
+end
+
+disableNativeControls()
+
+player.CharacterAdded:Connect(function()
+	task.defer(function()
+		if systemActive then
+			disableNativeControls()
+		end
+	end)
+end)
+
+-- =====================================
+-- HUD
+-- =====================================
+
+hudBtn.Activated:Connect(function()
+	hudVisible = not hudVisible
+	systemActive = hudVisible
+
+	joyBase.Visible = hudVisible
+	autoBtn.Visible = hudVisible
+	speedBtn.Visible = hudVisible
+	jumpBtn.Visible = hudVisible
+
+	if hudVisible then
+		disableNativeControls()
+		hudBtn.Text = "Ocultar controles"
+	else
+		enableNativeControls()
+		hudBtn.Text = "Mostrar controles"
+		joyActive = false
+		joyTouch = nil
+		joyTargetOffset = Vector2.zero
+		joyKnob.Position = UDim2.new(0.5, -29, 0.5, -29)
+	end
+end)
+
+-- =====================================
+-- EJECUTAR UN CLIC
+-- =====================================
+
+local function obtenerPosicion()
+	if posicionModo == "Elegida" and posicionElegida then
+		return posicionElegida
+	end
+
+	local vs = camera.ViewportSize
+	return Vector2.new(vs.X / 2, vs.Y / 2)
+end
+
+local function ejecutarOperacion()
+    local punto = obtenerPosicion()
+    local boton = botonesClick[botonIndex].value
+
+    -- tipoIndex: 1 = Simple, 2 = Doble,
+    -- 3 = Triple, 4 = Cuádruple
+    local cantidad = tipoIndex
+
+    local exito = pcall(function()
+        virtualInput:SendMousePosition(punto)
+
+        for i = 1, cantidad do
+            virtualInput:SendMouseButton(
+                punto,
+                boton,
+                true,
+                0
+            )
+
+            virtualInput:SendMouseButton(
+                punto,
+                boton,
+                false,
+                0
+            )
+
+            if i < cantidad then
+                task.wait(0.001)
+            end
+        end
+    end)
+
+    return exito
+end
+
+local function detenerAutoClicker()
+	autoEnabled = false
+	tiempoAcumulado = 0
+	autoBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+	statusLabel.Text = "Autoclicker: apagado"
+end
+
+-- =====================================
+-- MOTOR DEL AUTOCLICKER
+-- =====================================
+
+RunService.Heartbeat:Connect(function(dt)
+	if not autoEnabled or not systemActive then
+		tiempoAcumulado = 0
+		return
+	end
+
+	tiempoAcumulado += dt
+
+	local intervaloSegundos = intervaloClick / 1000
+
+	if tiempoAcumulado < intervaloSegundos then
+		return
+	end
+
+	-- Evitar recuperar retrasos con ráfagas enormes
+	local pendientes = math.floor(tiempoAcumulado / intervaloSegundos)
+	pendientes = math.min(pendientes, 8)
+
+	for i = 1, pendientes do
+		if not autoEnabled then
+			break
+		end
+
+		if not ejecutarOperacion() then
+			detenerAutoClicker()
+			break
+		end
+
+		tiempoAcumulado -= intervaloSegundos
+		cantidadRealizada += 1
+
+		if not repetirContinuamente
+		and cantidadRealizada >= cantidadRepeticiones then
+			detenerAutoClicker()
+			break
+		end
+	end
+
+	tiempoAcumulado = math.max(tiempoAcumulado, 0)
+end)
+
+-- =====================================
+-- ACTIVAR / DESACTIVAR AUTOCLICKER
+-- =====================================
+
+local autoTouch = nil
+local autoStartPos = nil
+local dragStartPos = nil
+local buttonStartPos = nil
+local autoDragging = false
+
+autoBtn.InputBegan:Connect(function(input)
+	if (
+		input.UserInputType == Enum.UserInputType.Touch
+		or input.UserInputType == Enum.UserInputType.MouseButton1
+	) and not autoTouch then
+		autoTouch = input
+		autoStartPos = input.Position
+		dragStartPos = input.Position
+		buttonStartPos = autoBtn.Position
+		autoDragging = false
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == autoTouch then
+		local delta = input.Position - autoStartPos
+
+		if delta.Magnitude > 15 then
+			autoDragging = true
+		end
+
+		if autoDragging then
+			local dx = input.Position.X - dragStartPos.X
+			local dy = input.Position.Y - dragStartPos.Y
+
+			autoBtn.Position = UDim2.new(
+				buttonStartPos.X.Scale,
+				buttonStartPos.X.Offset + dx,
+				buttonStartPos.Y.Scale,
+				buttonStartPos.Y.Offset + dy
+			)
+
+			speedBtn.Position = UDim2.new(
+				autoBtn.Position.X.Scale,
+				autoBtn.Position.X.Offset,
+				autoBtn.Position.Y.Scale,
+				autoBtn.Position.Y.Offset + 75
+			)
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input == autoTouch then
+		if not autoDragging then
+			if autoEnabled then
+				detenerAutoClicker()
+			else
+				autoEnabled = true
+				cantidadRealizada = 0
+				tiempoAcumulado = 0
+				autoBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 0)
+				statusLabel.Text = "Autoclicker: encendido"
+			end
+		end
+
+		autoTouch = nil
+		autoStartPos = nil
+		dragStartPos = nil
+		buttonStartPos = nil
+		autoDragging = false
+	end
+end)
+
+-- =====================================
+-- SALTO
+-- =====================================
+
+jumpBtn.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch
+	or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if humanoid then
+			humanoid.Jump = true
+		end
+	end
+end)
+
+-- =====================================
+-- JOYSTICK
+-- =====================================
+
+local joyTouch = nil
+local joyActive = false
+local joyTargetOffset = Vector2.zero
+local maxRadius = 41
+
+joyBase.InputBegan:Connect(function(input)
+	if (
+		input.UserInputType == Enum.UserInputType.Touch
+		or input.UserInputType == Enum.UserInputType.MouseButton1
+	) and not joyTouch then
+		joyTouch = input
+		joyActive = true
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == joyTouch and joyActive then
+		local center = joyBase.AbsolutePosition + joyBase.AbsoluteSize / 2
+		local inputPos = Vector2.new(input.Position.X, input.Position.Y)
+		local offset = inputPos - center
+
+		if offset.Magnitude > maxRadius then
+			offset = offset.Unit * maxRadius
+		end
+
+		joyTargetOffset = offset
+
+		joyKnob.Position = UDim2.new(
+			0.5, offset.X - 29,
+			0.5, offset.Y - 29
+		)
+	end
+end)
+
+local function releaseJoystick()
+	joyTouch = nil
+	joyActive = false
+	joyTargetOffset = Vector2.zero
+	joyKnob.Position = UDim2.new(0.5, -29, 0.5, -29)
+
+	if humanoid then
+		humanoid:Move(Vector3.zero, false)
+	end
+
+	if hrp then
+		local velocity = hrp.AssemblyLinearVelocity
+		hrp.AssemblyLinearVelocity = Vector3.new(0, velocity.Y, 0)
+	end
+end
+
+UserInputService.InputEnded:Connect(function(input)
+	if input == joyTouch then
+		releaseJoystick()
+	end
+end)
+
+-- =====================================
+-- MOVIMIENTO SEGÚN LA CÁMARA
+-- =====================================
+
+RunService.RenderStepped:Connect(function()
+	if not systemActive or not joyActive or not humanoid or not hrp then
+		return
+	end
+
+	if humanoid.Health <= 0 then
+		releaseJoystick()
+		return
+	end
+
+	local dirX = joyTargetOffset.X / maxRadius
+	local dirY = joyTargetOffset.Y / maxRadius
+
+	local look = camera.CFrame.LookVector
+	local right = camera.CFrame.RightVector
+
+	local forward = Vector3.new(look.X, 0, look.Z)
+	local rightFlat = Vector3.new(right.X, 0, right.Z)
+
+	if forward.Magnitude > 0.01 then
+		forward = forward.Unit
+	end
+
+	if rightFlat.Magnitude > 0.01 then
+		rightFlat = rightFlat.Unit
+	end
+
+	local moveDirection = forward * -dirY + rightFlat * dirX
+
+	if moveDirection.Magnitude > 0.01 then
+		humanoid:Move(moveDirection.Unit, false)
+	else
+		humanoid:Move(Vector3.zero, false)
+	end
+end)
+
+actualizarPanel()
